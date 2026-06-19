@@ -287,7 +287,17 @@ select.field { cursor: pointer; }
   resize: none;
   margin-bottom: 14px;
 }
-.modal-actions { display: flex; gap: 10px; }
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  margin: 0 -20px -20px -20px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  z-index: 10;
+}
 
 /* BUTTONS */
 .btn-gold {
@@ -361,6 +371,33 @@ select.field { cursor: pointer; }
   z-index: 9999;
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* AUTOSAVE INDICATOR — tiny, sub-1-second pop, never blocks a tap */
+#autosave-indicator {
+  position: fixed;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  background: rgba(76,175,80,0.95);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 12px;
+  z-index: 9998;
+  opacity: 0;
+  transform: translate(-50%, 14px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+#autosave-indicator.pop {
+  animation: autosavePop 0.8s ease;
+}
+@keyframes autosavePop {
+  0%   { transform: translate(-50%, 14px); opacity: 0; }
+  15%  { transform: translate(-50%, 0);    opacity: 1; }
+  75%  { transform: translate(-50%, 0);    opacity: 1; }
+  100% { transform: translate(-50%, 14px); opacity: 0; }
 }
 
 /* ============================================================

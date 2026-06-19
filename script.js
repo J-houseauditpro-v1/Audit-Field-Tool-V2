@@ -227,6 +227,18 @@ function toast(msg) {
   toastTimer = setTimeout(function() { el.style.display = 'none'; }, 2500);
 }
 
+// ── AUTOSAVE INDICATOR ──────────────────────────────────────────
+// Tiny, sub-1-second pop at the bottom of the screen. pointer-events:none in
+// the CSS means it can never block a tap even if it visually overlaps a
+// button for that instant.
+function showAutosaveIndicator() {
+  var el = document.getElementById('autosave-indicator');
+  if (!el) return;
+  el.classList.remove('pop');
+  void el.offsetWidth; // force reflow so the animation restarts on rapid repeats
+  el.classList.add('pop');
+}
+
 // ── INIT ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   initPhotoDB(function() {
@@ -248,6 +260,10 @@ document.addEventListener('DOMContentLoaded', function() {
   positionPhotoStickyControls();
   window.addEventListener('resize', positionPhotoStickyControls);
   window.addEventListener('orientationchange', positionPhotoStickyControls);
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') autosaveAudit();
+  });
+  window.addEventListener('pagehide', function() { autosaveAudit(); });
   initModal();
   initAuditsTab();
   initExportTab();
@@ -275,6 +291,7 @@ function positionPhotoStickyControls() {
 function initTabs() {
   document.querySelectorAll('.tab').forEach(function(btn) {
     btn.addEventListener('click', function() {
+      autosaveAudit();
       document.querySelectorAll('.tab').forEach(function(b) { b.classList.remove('active'); });
       document.querySelectorAll('.tabpanel').forEach(function(p) { p.style.display = 'none'; });
       btn.classList.add('active');
@@ -406,6 +423,7 @@ function initVoice() {
     status.textContent = 'Paused — tap to continue';
     dumpEl.value = S.dump;
     save();
+    autosaveAudit();
   }
 }
 
@@ -464,6 +482,7 @@ function initPhotoInput() {
       done++;
       if (done === pending) {
         save();
+        autosaveAudit();
         if (files.length === 1 && addedIds.length === 1) {
           openModal(addedIds[0]);
         } else {
@@ -629,7 +648,7 @@ function renderFullView(list) {
           var id = Number(btn.dataset.id);
           deletePhotoFromDB(id, function() {
             S.photos = S.photos.filter(function(p) { return p.id !== id; });
-            save(); renderPhotoList();
+            save(); autosaveAudit(); renderPhotoList();
           });
         }
       });
@@ -729,6 +748,7 @@ function initPhotoViewControls() {
         if (deleted === idsToDelete.length) {
           S.photos = S.photos.filter(function(p) { return !idsToDelete.includes(p.id); });
           save();
+          autosaveAudit();
           exitSelectMode();
           toast('Deleted ' + idsToDelete.length + ' photo(s)');
         }
@@ -769,6 +789,7 @@ function initPhotoViewControls() {
         done++;
         if (done === pending) {
           save();
+          autosaveAudit();
           renderPhotoList();
           if (added) toast(added + ' photo(s) added');
         }
@@ -992,6 +1013,7 @@ function openModal(id) {
 function closeModal() {
   stopNoteRec();
   flushNoteAutosaveNow();
+  autosaveAudit();
   document.getElementById('photo-modal').style.display = 'none';
   modalPhotoId = null;
 }
@@ -1006,8 +1028,10 @@ function initAuditsTab() {
   });
 }
 
-function saveAudit() {
-  if (!S.name && !S.dump && !S.photos.length) { toast('Nothing to save'); return; }
+// Core upsert into the Saved Audits list — shared by the manual Save button
+// and the silent autosave checkpoints below. Always upserts by S.auditId, so
+// repeated calls update the same record rather than creating duplicates.
+function persistAuditRecord() {
   var id = S.auditId || ('audit-' + Date.now());
   S.auditId = id;
 
@@ -1041,12 +1065,29 @@ function saveAudit() {
   save();
   renderAuditsList();
   renderCurrentAuditLabel();
+}
+
+function saveAudit() {
+  if (!S.name && !S.dump && !S.photos.length) { toast('Nothing to save'); return; }
+  persistAuditRecord();
   toast('Saved: ' + (S.name || 'Unnamed audit'));
+}
+
+// Silent checkpoint autosave. Fires only at natural pause points (tab switch,
+// photo added/deleted, recording stopped, note screen closed, signature saved,
+// app backgrounded) — never on a timer, never mid-action. Pushes the same
+// record the manual Save button writes, so nothing is ever lost to a crash,
+// a dropped signal, or forgetting to tap Save.
+function autosaveAudit() {
+  if (!S.name && !S.dump && !S.photos.length) return;
+  persistAuditRecord();
+  showAutosaveIndicator();
 }
 
 function clearCurrent() {
   S.name = ''; S.address = ''; S.date = ''; S.year = ''; S.sqft = ''; S.coop = '';
   S.dump = ''; S.photos = []; S.auditId = null; S.tcSignature = null;
+  clearTCSignature();
   save();
   fillFields();
   renderHeader();
@@ -1655,6 +1696,19 @@ var tcStrokes = [];
 var tcCurrentStroke = [];
 var tcHasSig = false;
 
+// Wipes the customer signature — used by the on-card Clear button and by
+// Reset Current Audit, so a new customer never inherits the last one's signature.
+function clearTCSignature() {
+  tcStrokes = []; tcCurrentStroke = []; tcHasSig = false;
+  S.tcSignature = null; save();
+  var preview = document.getElementById('tc-sig-preview');
+  var noSigMsg = document.getElementById('tc-no-sig-msg');
+  var clearBtn = document.getElementById('tc-sig-clear');
+  if (preview) preview.style.display = 'none';
+  if (noSigMsg) noSigMsg.style.display = 'block';
+  if (clearBtn) clearBtn.style.display = 'none';
+}
+
 function initTCTab() {
   tcSigCanvas = document.getElementById('tc-sig-canvas');
   if (!tcSigCanvas) return;
@@ -1674,6 +1728,7 @@ function initTCTab() {
     // Save signature as data URL
     S.tcSignature = tcSigCanvas.toDataURL('image/png');
     save();
+    autosaveAudit();
 
     // Show preview
     var preview = document.getElementById('tc-sig-preview');
@@ -1693,14 +1748,7 @@ function initTCTab() {
 
   // Clear button (on T&C card)
   document.getElementById('tc-sig-clear').addEventListener('click', function() {
-    tcStrokes = []; tcCurrentStroke = []; tcHasSig = false;
-    S.tcSignature = null; save();
-    var preview = document.getElementById('tc-sig-preview');
-    var noSigMsg = document.getElementById('tc-no-sig-msg');
-    var clearBtn = document.getElementById('tc-sig-clear');
-    if (preview) preview.style.display = 'none';
-    if (noSigMsg) noSigMsg.style.display = 'block';
-    if (clearBtn) clearBtn.style.display = 'none';
+    clearTCSignature();
     toast('Signature cleared');
   });
 
